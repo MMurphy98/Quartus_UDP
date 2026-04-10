@@ -7,6 +7,24 @@
 - FPGA 从 SDRAM 回读数据并通过 UDP 返回 PC
 - MATLAB 脚本对回传数据进行完整性比较，并可导出错误列表
 
+## 系统流程图
+
+```mermaid
+flowchart LR
+   PC[PC MATLAB\nudp_test_assistant.m] -->|UDP send| ETH[FPGA Ethernet RX/TX]
+   ETH --> BRIDGE[sdram_udp_bridge]
+   BRIDGE --> SDRAM[SDRAM Controller + SDRAM]
+   SDRAM --> BRIDGE
+   BRIDGE -->|UDP readback| ETH
+   ETH -->|UDP receive| PC
+   PC --> CMP[Data Compare + Error Report]
+```
+
+说明：
+- 发送路径：PC 生成 flag + payload + padding，通过 UDP 发给 FPGA，写入 SDRAM。
+- 回读路径：PC 发送 READ 命令，FPGA 从 SDRAM 读出并按包序回传。
+- 校验路径：MATLAB 按 flag 对齐后比较原始数据与回传数据。
+
 ## 项目结构
 
 ```text
@@ -69,6 +87,35 @@ udp_test_assistant
 - 修改传输长度后，建议先 `quit` 再重启脚本，避免 `persistent` 状态干扰。
 - 回传不完整时，会输出接收统计与局部比较结果。
 - 发现错误后可导出 `error_list_时间戳.xlsx` 进行离线分析。
+
+## 测试结果截图模板
+
+建议在仓库中创建 `docs/images/` 目录并按下列占位命名截图文件，便于持续记录测试结果。
+
+### 测试记录表
+
+| 日期 | FPGA Bitstream | 数据规模 (int32) | 发送耗时 (s) | 回读耗时 (s) | 错误数 | 正确率 | 备注 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 2026-04-10 | eth_pc_loop.sof | 1,024 | 0.010 | 0.020 | 0 | 100.000000% | 基线测试 |
+| YYYY-MM-DD | xxxxx.sof | N | T_send | T_read | E | P% | 例如：端序修复后 |
+
+### 截图清单（占位）
+
+1. MATLAB 控制台发送日志
+
+![MATLAB send log](docs/images/matlab_send_log.png)
+
+2. MATLAB 回读比较结果日志
+
+![MATLAB read compare log](docs/images/matlab_read_compare_log.png)
+
+3. Quartus 编译摘要（可选）
+
+![Quartus compile summary](docs/images/quartus_compile_summary.png)
+
+4. SignalTap 波形（可选）
+
+![SignalTap waveform](docs/images/signaltap_waveform.png)
 
 ## 许可证
 

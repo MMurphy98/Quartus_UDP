@@ -1,3 +1,29 @@
-# Quartus runtime lock files
+# Quartus build/runtime lock files
 *.flock
 *.lock
+
+# Quartus generated databases and build outputs
+db/
+incremental_db/
+output_files/
+greybox_tmp/
+
+# Common generated reports/logs
+*.rpt
+*.summary
+*.smsg
+*.jdi
+*.jditmp
+*.pin
+*.done
+
+# Temp and backup files
+*.bak
+*.tmp
+
+# MATLAB temporary artifacts
+*.asv
+
+# OS/editor noise
+Thumbs.db
+.DS_Store
