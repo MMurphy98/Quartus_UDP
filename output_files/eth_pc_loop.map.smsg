@@ -1,3 +1,0 @@
-Info (10281): Verilog HDL Declaration information at sdram_udp_bridge.v(51): object "tx_done" differs only in case from object "TX_DONE" in the same scope File: C:/Users/yjjtn/Desktop/UDP/Quartus/rtl/sdram_udp_bridge.v Line: 51
-Info (10281): Verilog HDL Declaration information at sdram_ctrl.v(49): object "CNT_200US" differs only in case from object "cnt_200us" in the same scope File: C:/Users/yjjtn/Desktop/UDP/Quartus/rtl/SDRAM/sdram_ctrl.v Line: 49
-Info (10281): Verilog HDL Declaration information at sdram_ctrl.v(50): object "CNT_REFRESH" differs only in case from object "cnt_refresh" in the same scope File: C:/Users/yjjtn/Desktop/UDP/Quartus/rtl/SDRAM/sdram_ctrl.v Line: 50
