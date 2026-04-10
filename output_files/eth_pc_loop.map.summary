@@ -1,0 +1,14 @@
+Analysis & Synthesis Status : Successful - Wed Apr  8 16:08:15 2026
+Quartus Prime Version : 24.1std.0 Build 1077 03/04/2025 SC Lite Edition
+Revision Name : eth_pc_loop
+Top-level Entity Name : eth_pc_loop
+Family : Cyclone IV E
+Total logic elements : 5,825
+    Total combinational functions : 4,243
+    Dedicated logic registers : 2,635
+Total registers : 2635
+Total pins : 140
+Total virtual pins : 0
+Total memory bits : 350,976
+Embedded Multiplier 9-bit elements : 0
+Total PLLs : 1

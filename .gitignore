@@ -1,0 +1,3 @@
+# Quartus runtime lock files
+*.flock
+*.lock
