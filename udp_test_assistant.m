@@ -79,6 +79,8 @@ function udp_test_assistant
                     while isprop(udp_receiver, 'NumDatagramsAvailable') && udp_receiver.NumDatagramsAvailable > 0
                         read(udp_receiver, udp_receiver.NumDatagramsAvailable, "uint8");
                     end
+
+                    % clean receiver buffer by reading until empty, to avoid old packets interfering with the next read
                 catch
                 end
                 send_start = tic;
@@ -245,6 +247,8 @@ function udp_test_assistant
                         else
                             recv_data_compare = recv_data_effective(:);
                         end
+
+                        % Compare correctness of the data
                         compare_length = num_int32_orig;
                         send_data_compare = send_data(2 : 1 + num_int32_orig);
                         if isrow(send_data_compare), send_data_compare = send_data_compare(:); end

@@ -53,7 +53,7 @@ flowchart TD
    描述 `send/read` 的测试目标。
 
 3. `persistent udp_sender udp_receiver send_data all_data_bytes`  
-   持久化变量，函数多次调用时保留状态（避免重复创建 UDP）。
+   **持久化变量**，函数多次调用时保留状态（避免重复创建 UDP）。
 
 4. `persistent num_int32_padded ... target_port`  
    持久化传输长度、分包参数、IP/端口等配置。
