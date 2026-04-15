@@ -79,36 +79,10 @@ module eth_pc_loop(
     wire [19:0] pkt_count;
     wire rst_n = SW[0];
     wire rst_n_pll = SW[1];
-    localparam [18:0] SW2_DB_CNT_MAX = 19'd249999; // ~10 ms @ 25 MHz RX clock
-    reg sw2_meta;
-    reg sw2_sync;
-    reg sw2_db;
-    reg [18:0] sw2_db_cnt;
     wire pkt_counter_rst_n;
 
-    assign gpio_gen_en = sw2_db;
-    assign pkt_counter_rst_n = rst_n & gpio_gen_en;
-
-    // Debounce SW[2] in RX clock domain so generator enable is stable.
-    always @(posedge ENET0_RX_CLK or negedge sys_rst_n) begin
-        if (!sys_rst_n) begin
-            sw2_meta   <= 1'b0;
-            sw2_sync   <= 1'b0;
-            sw2_db     <= 1'b0;
-            sw2_db_cnt <= 19'd0;
-        end else begin
-            sw2_meta <= SW[2];
-            sw2_sync <= sw2_meta;
-
-            if (sw2_sync == sw2_db)
-                sw2_db_cnt <= 19'd0;
-            else if (sw2_db_cnt == SW2_DB_CNT_MAX) begin
-                sw2_db     <= sw2_sync;
-                sw2_db_cnt <= 19'd0;
-            end else
-                sw2_db_cnt <= sw2_db_cnt + 1'b1;
-        end
-    end
+    assign gpio_gen_en = 1'b1;
+    assign pkt_counter_rst_n = sys_rst_n;
 
     pll_clk u_pll (
         .inclk0 (CLOCK_50),
