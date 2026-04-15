@@ -25,6 +25,7 @@ module gpio_stream_gen #(
 
     localparam WORDS_PER_PKT = 8'd128;
     localparam [15:0] BYTES_PER_PKT = WORDS_PER_PKT * 16'd4;
+    localparam [31:0] FLAG_WORD = 32'h7FFF_FFFF; // int32(2147483647)
 
     reg [4:0]  period_cnt;
     reg [1:0]  valid_phase;
@@ -36,6 +37,7 @@ module gpio_stream_gen #(
     reg        got_first_12b;
     reg [7:0]  word_cnt;
     reg [31:0] pkt_cnt;
+    reg        flag_sent;
 
     wire [23:0] sample_24b = {first_12b, gpio_data12};
     wire [31:0] sample_32b_zero = {8'h00, sample_24b};
@@ -57,6 +59,7 @@ module gpio_stream_gen #(
             got_first_12b  <= 1'b0;
             word_cnt       <= 8'd0;
             pkt_cnt        <= 32'd0;
+            flag_sent      <= 1'b0;
 
             rec_en         <= 1'b0;
             rec_data       <= 32'd0;
@@ -72,6 +75,7 @@ module gpio_stream_gen #(
             got_first_12b  <= 1'b0;
             word_cnt       <= 8'd0;
             pkt_cnt        <= 32'd0;
+            flag_sent      <= 1'b0;
 
             rec_en         <= 1'b0;
             rec_data       <= 32'd0;
@@ -119,8 +123,15 @@ module gpio_stream_gen #(
                 end else begin
                     got_first_12b <= 1'b0;
                     rec_en        <= 1'b1;
-                    rec_data      <= sample_32b;
-                    sample_word_counter <= sample_word_counter + 24'd1;
+
+                    // Match original UDP test format: emit FLAG as the first word once after enable.
+                    if (!flag_sent) begin
+                        rec_data   <= FLAG_WORD;
+                        flag_sent  <= 1'b1;
+                    end else begin
+                        rec_data   <= sample_32b;
+                        sample_word_counter <= sample_word_counter + 24'd1;
+                    end
 
                     if (word_cnt == WORDS_PER_PKT - 1'b1) begin
                         word_cnt      <= 8'd0;
