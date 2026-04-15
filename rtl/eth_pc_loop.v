@@ -37,6 +37,7 @@ module eth_pc_loop(
     parameter BOARD_IP  = {8'd192, 8'd168, 8'd1, 8'd123};
     parameter DES_MAC    = 48'hff_ff_ff_ff_ff_ff;
     parameter DES_IP    = {8'd192, 8'd168, 8'd1, 8'd102};
+    parameter GPIO_TOTAL_PKTS = 32'd78125;
 
     parameter ADDR_MIN = 25'd0;
     parameter ADDR_MAX = 25'd15999999;
@@ -46,9 +47,19 @@ module eth_pc_loop(
     wire locked;
     wire sys_rst_n = rst_n & locked;
 
+    wire udp_rec_pkt_done, udp_rec_en;
+    wire [31:0] udp_rec_data;
+    wire [15:0] udp_rec_byte_num;
+
+    wire gpio_rec_pkt_done, gpio_rec_en;
+    wire [31:0] gpio_rec_data;
+    wire [15:0] gpio_rec_byte_num;
+
     wire rec_pkt_done, rec_en;
     wire [31:0] rec_data;
     wire [15:0] rec_byte_num;
+    wire udp_read_cmd;
+    wire gpio_gen_en;
     wire tx_done, tx_req;
     wire tx_start_en;
     wire [31:0] tx_data;
@@ -68,6 +79,35 @@ module eth_pc_loop(
     wire [19:0] pkt_count;
     wire rst_n = SW[0];
     wire rst_n_pll = SW[1];
+
+    localparam [18:0] SW_DB_MAX = 19'd499999;
+    reg sw2_meta, sw2_sync;
+    reg sw2_db;
+    reg [18:0] sw2_db_cnt;
+
+    assign gpio_gen_en = sw2_db;
+
+    // Debounce SW[2] in ENET0_RX_CLK domain.
+    always @(posedge ENET0_RX_CLK or negedge sys_rst_n) begin
+        if (!sys_rst_n) begin
+            sw2_meta   <= 1'b0;
+            sw2_sync   <= 1'b0;
+            sw2_db     <= 1'b0;
+            sw2_db_cnt <= 19'd0;
+        end else begin
+            sw2_meta <= SW[2];
+            sw2_sync <= sw2_meta;
+
+            if (sw2_sync == sw2_db)
+                sw2_db_cnt <= 19'd0;
+            else if (sw2_db_cnt == SW_DB_MAX) begin
+                sw2_db     <= sw2_sync;
+                sw2_db_cnt <= 19'd0;
+            end else
+                sw2_db_cnt <= sw2_db_cnt + 1'b1;
+        end
+    end
+
     pll_clk u_pll (
         .inclk0 (CLOCK_50),
         .areset (~rst_n_pll),
@@ -93,14 +133,37 @@ module eth_pc_loop(
         .tx_byte_num  (tx_byte_num),
         .tx_done      (tx_done),
         .tx_req       (tx_req),
-        .rec_pkt_done (rec_pkt_done),
-        .rec_en       (rec_en),
-        .rec_data     (rec_data),
-        .rec_byte_num (rec_byte_num),
+        .rec_pkt_done (udp_rec_pkt_done),
+        .rec_en       (udp_rec_en),
+        .rec_data     (udp_rec_data),
+        .rec_byte_num (udp_rec_byte_num),
         .eth_tx_en    (ENET0_TX_EN),
         .eth_tx_data  (ENET0_TX_DATA),
         .eth_rst_n    (ENET0_RST_N)
     );
+
+    gpio_stream_gen #(
+        .VALID_PERIOD_CYCLES (5),
+        .PAD_MODE            (2'd0),
+        .TOTAL_PKTS          (GPIO_TOTAL_PKTS)
+    ) u_gpio_stream_gen (
+        .clk          (ENET0_RX_CLK),
+        .rst_n        (sys_rst_n),
+        .enable       (gpio_gen_en),
+        .rec_en       (gpio_rec_en),
+        .rec_data     (gpio_rec_data),
+        .rec_pkt_done (gpio_rec_pkt_done),
+        .rec_byte_num (gpio_rec_byte_num)
+    );
+
+    // Keep UDP READ command support, but switch SDRAM write payload source to internal GPIO stream.
+    assign udp_read_cmd = udp_rec_en && udp_rec_pkt_done &&
+                          (udp_rec_byte_num == 16'd4) && (udp_rec_data == 32'h52454144);
+
+    assign rec_en       = udp_read_cmd ? udp_rec_en       : gpio_rec_en;
+    assign rec_data     = udp_read_cmd ? udp_rec_data     : gpio_rec_data;
+    assign rec_pkt_done = udp_read_cmd ? udp_rec_pkt_done : gpio_rec_pkt_done;
+    assign rec_byte_num = udp_read_cmd ? udp_rec_byte_num : gpio_rec_byte_num;
 
     sdram_udp_bridge #(
         .ADDR_MIN     (ADDR_MIN),
