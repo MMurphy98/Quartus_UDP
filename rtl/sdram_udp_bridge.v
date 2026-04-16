@@ -43,7 +43,7 @@ module sdram_udp_bridge #(
 
     // Send FIFO (write side: bridge writes SDRAM read data)
     output reg        send_fifo_wrreq,
-    output     [31:0] send_fifo_din,        // tie to rd_data in top
+    output reg [31:0] send_fifo_din,
 
     // UDP send (to UDP module)
     output reg        tx_start_en,
@@ -61,8 +61,7 @@ module sdram_udp_bridge #(
     assign rd_min_addr = 25'd0;
     assign rd_len      = LEN;
     localparam WORDS_DATA_PER_PKT = 8'd128;   // 每包 2 字序号 + 128 字数据，共 130 字 = 520 字节
-    localparam RD_LATENCY         = 3'd1;      // SDRAM 读 FIFO 有效数据滞后拍数（仅第 1 拍无效，跳过 1 拍）
-    assign send_fifo_din = (rd_cyc_cnt <= 9'd1) ? pkt_idx : rd_data;
+    localparam RD_LATENCY         = 3'd1;      // SDRAM 读 FIFO 从 rd_en 到 rd_data 有效的固定延迟拍数
 
     // ---------- RX domain (clk_rx): packet buffer and write to SDRAM ----------
     reg [31:0] pkt_buf [0:127];
@@ -82,6 +81,18 @@ module sdram_udp_bridge #(
     reg [1:0] rx_state;
 
     wire is_read_cmd = rec_pkt_done && (rec_byte_num == 16'd4) && (first_word_rx == READ_CMD);
+
+    always @(posedge clk_rx or negedge rst_n) begin
+        if (!rst_n) begin
+            dbg_wr_data   <= 32'd0;
+            dbg_wr_en     <= 1'b0;
+            dbg_drain_cnt <= 7'd0;
+        end else begin
+            dbg_wr_data   <= wr_data;
+            dbg_wr_en     <= wr_en;
+            dbg_drain_cnt <= drain_cnt;
+        end
+    end
 
     always @(posedge clk_rx or negedge rst_n) begin
         if (!rst_n) begin
@@ -217,22 +228,24 @@ module sdram_udp_bridge #(
     // ---------- TX domain: read SDRAM and send via UDP ----------
     // TX_CAPTURE: delay 2 cycles so send_byte_count_sync2 is stable (avoids CDC race with do_read)
     localparam TX_IDLE       = 3'd0;
-    localparam TX_CAPTURE    = 3'd1;   // wait 2 cycles then capture send_byte_count_sync2, go to TX_RD_REQ
-    localparam TX_RD_REQ     = 3'd2;   // assert rd_en for 128 cycles
-    localparam TX_NEXT_PKT   = 3'd3;   // assert tx_start_en
-    localparam TX_WAIT_TX    = 3'd4;   // wait tx_done
-    localparam TX_DONE       = 3'd5;
+    localparam TX_CAPTURE    = 3'd1;   // wait 2 cycles then capture send_byte_count_sync2
+    localparam TX_HDR        = 3'd2;   // write two pkt_idx words into send fifo
+    localparam TX_DATA_WAIT  = 3'd3;   // wait for the first rd_data to become valid
+    localparam TX_DATA       = 3'd4;   // write 128 payload words into send fifo
+    localparam TX_NEXT_PKT   = 3'd5;   // assert tx_start_en
+    localparam TX_WAIT_TX    = 3'd6;   // wait tx_done
+    localparam TX_DONE       = 3'd7;
     // 包间/批间延时已注释，发完一包直接发下一包
     // localparam TX_PKT_GAP    = 3'd6;   // 包间延时 + 每 7816 包后 1 s 批间隔（clk_tx=25MHz）
     // localparam PKT_GAP_CYCLES   = 16'd10000;   // 每包后延时 ≈ 0.4 ms
     // localparam PKTS_PER_BATCH   = 13'd7816;
     // localparam BATCH_GAP_CYCLES = 25'd25000000; // 每批后追加 1 s @ 25 MHz
 
-    reg [2:0]  tx_state;   // IDLE, CAPTURE, RD_REQ, NEXT_PKT, WAIT_TX, DONE
+    reg [2:0]  tx_state;   // IDLE, CAPTURE, HDR, DATA_WAIT, DATA, NEXT_PKT, WAIT_TX, DONE
     // reg [24:0] gap_cnt;     // 包间或批间延时计数
     // reg [12:0] batch_cnt;  // 当前批内已发包数 1..7816
     reg        capture_cycle;   // 0 = first cycle in TX_CAPTURE, 1 = second cycle
-    reg [8:0]  rd_cyc_cnt;     // 0..words_this_pkt，每包先 1 字序号再 words_this_pkt 字数据
+    reg [8:0]  rd_cyc_cnt;
     reg [3:0]  lat_cnt;
     reg [31:0] words_to_send;
     reg [31:0] words_sent;
@@ -240,6 +253,20 @@ module sdram_udp_bridge #(
     reg        rd_en_d1;
     reg [31:0] pkt_idx;        // 当前包序号（从 1 起始），发往 PC 用于重排
     reg [7:0]  words_this_pkt; // 本包 SDRAM 字数（1..128），首包时在 rd_cyc_cnt==0 置位
+    reg [1:0]  hdr_word_cnt;
+    reg [7:0]  payload_word_cnt;
+
+    // SignalTap debug signals. Keep them in synthesis so they can be probed reliably.
+    (*preserve *) reg [31:0] dbg_wr_data         /* synthesis keep */;
+    (*preserve *) reg        dbg_wr_en           /* synthesis keep */;
+    (*preserve *) reg [6:0]  dbg_drain_cnt       /* synthesis keep */;
+    (*preserve *) reg [31:0] dbg_rd_data         /* synthesis keep */;
+    (*preserve *) reg        dbg_rd_en           /* synthesis keep */;
+    (*preserve *) reg [31:0] dbg_send_fifo_din   /* synthesis keep */;
+    (*preserve *) reg        dbg_send_fifo_wrreq /* synthesis keep */;
+    (*preserve *) reg [31:0] dbg_pkt_idx         /* synthesis keep */;
+    (*preserve *) reg [2:0]  dbg_tx_state        /* synthesis keep */;
+    (*preserve *) reg [7:0]  dbg_payload_count   /* synthesis keep */;
 
     always @(posedge clk_tx or negedge rst_n) begin
         if (!rst_n) begin
@@ -258,24 +285,39 @@ module sdram_udp_bridge #(
             rd_en_d1        <= 1'b0;
             pkt_idx         <= 32'd1;   // 包序号从 1 开始
             words_this_pkt  <= 8'd128;
+            dbg_rd_data         <= 32'd0;
+            dbg_rd_en           <= 1'b0;
+            dbg_send_fifo_din   <= 32'd0;
+            dbg_send_fifo_wrreq <= 1'b0;
+            dbg_pkt_idx         <= 32'd0;
+            dbg_tx_state        <= TX_IDLE;
+            dbg_payload_count   <= 8'd0;
             // gap_cnt         <= 25'd0;
             // batch_cnt       <= 13'd1;
         end else begin
             rd_en_d1 <= rd_en;
             send_fifo_wrreq <= 1'b0;
+            send_fifo_din <= 32'd0;
             tx_start_en <= 1'b0;
             rd_load <= 1'b0;
+            rd_en <= 1'b0;
+
+            dbg_rd_data         <= rd_data;
+            dbg_rd_en           <= rd_en;
+            dbg_send_fifo_din   <= send_fifo_din;
+            dbg_send_fifo_wrreq <= send_fifo_wrreq;
+            dbg_pkt_idx         <= pkt_idx;
+            dbg_tx_state        <= tx_state;
+            dbg_payload_count   <= payload_word_cnt;
 
             case (tx_state)
                 TX_IDLE: begin
-                    rd_en <= 1'b0;
                     capture_cycle <= 1'b0;
                     if (do_read_pos && sdram_init_done)
                         tx_state <= TX_CAPTURE;
                 end
 
                 TX_CAPTURE: begin
-                    rd_en <= 1'b0;
                     if (!capture_cycle) begin
                         capture_cycle <= 1'b1;   // first cycle: just wait
                     end else begin
@@ -285,36 +327,61 @@ module sdram_udp_bridge #(
                         rd_max_addr     <= ((send_byte_count_sync2 >> 2) + 32'd127) / 32'd128 * 32'd128;
                         rd_load         <= 1'b1;
                         rd_cyc_cnt      <= 9'd0;
+                        hdr_word_cnt    <= 2'd0;
+                        payload_word_cnt <= 8'd0;
+                        lat_cnt         <= 4'd0;
                         pkt_idx         <= 32'd1;   // 包序号从 1 开始
                         words_this_pkt  <= 8'd128;
                         // batch_cnt       <= 13'd1;
-                        tx_state        <= TX_RD_REQ;
+                        tx_state        <= TX_HDR;
                         capture_cycle   <= 1'b0;
                     end
                 end
 
-                TX_RD_REQ: begin
+                TX_HDR: begin
                     if (!sdram_init_done)
                         tx_state <= TX_IDLE;
                     else if (words_sent >= words_to_send)
                         tx_state <= TX_DONE;
                     else begin
-                        if (rd_cyc_cnt == 9'd0)
-                            words_this_pkt <= 8'd128;
-                        // 仅首包(rd_load 后)需跳过 RD_LATENCY 拍无效数据；第二包起 FIFO 已连续，不再跳过
-                        send_fifo_wrreq <= (rd_cyc_cnt <= 9'd1) ||
-                            (words_sent == 32'd0 ? (rd_cyc_cnt >= 9'd3 + RD_LATENCY && rd_cyc_cnt <= words_this_pkt + 9'd2 + RD_LATENCY)
-                                                 : (rd_cyc_cnt >= 9'd3 && rd_cyc_cnt <= words_this_pkt + 9'd2));
-                        rd_en <= (words_sent == 32'd0)
-                            ? (rd_cyc_cnt >= 9'd2 && rd_cyc_cnt < words_this_pkt + 9'd2 + RD_LATENCY)
-                            : (rd_cyc_cnt >= 9'd2 && rd_cyc_cnt < words_this_pkt + 9'd2);
-                        if (rd_cyc_cnt == (words_sent == 32'd0 ? words_this_pkt + 9'd2 + RD_LATENCY : words_this_pkt + 9'd2)) begin
-                            rd_en <= 1'b0;
+                        send_fifo_wrreq <= 1'b1;
+                        send_fifo_din   <= pkt_idx;
+                        if (hdr_word_cnt == 2'd1) begin
+                            hdr_word_cnt <= 2'd0;
                             lat_cnt <= 4'd0;
+                            rd_en <= 1'b1;   // prime the first payload word
+                            tx_state <= TX_DATA_WAIT;
+                        end else begin
+                            hdr_word_cnt <= hdr_word_cnt + 1'b1;
+                        end
+                    end
+                end
+
+                TX_DATA_WAIT: begin
+                    if (!sdram_init_done)
+                        tx_state <= TX_IDLE;
+                    else if (RD_LATENCY == 0 || lat_cnt == RD_LATENCY - 1'b1) begin
+                        lat_cnt <= 4'd0;
+                        payload_word_cnt <= 8'd0;
+                        tx_state <= TX_DATA;
+                    end else begin
+                        lat_cnt <= lat_cnt + 1'b1;
+                    end
+                end
+
+                TX_DATA: begin
+                    if (!sdram_init_done)
+                        tx_state <= TX_IDLE;
+                    else begin
+                        send_fifo_wrreq <= 1'b1;
+                        send_fifo_din   <= rd_data;
+                        if (payload_word_cnt == words_this_pkt - 1'b1) begin
+                            payload_word_cnt <= 8'd0;
                             tx_state <= TX_NEXT_PKT;
-                            rd_cyc_cnt <= 9'd0;
-                        end else
-                            rd_cyc_cnt <= rd_cyc_cnt + 9'd1;
+                        end else begin
+                            payload_word_cnt <= payload_word_cnt + 1'b1;
+                            rd_en <= 1'b1;  // request the next payload word
+                        end
                     end
                 end
 
@@ -340,14 +407,14 @@ module sdram_udp_bridge #(
                             //     batch_cnt <= batch_cnt + 13'd1;
                             // end
                             // tx_state <= TX_PKT_GAP;
-                            tx_state <= TX_RD_REQ;
+                            tx_state <= TX_HDR;
                         end
                     end
                 end
 
                 // TX_PKT_GAP: begin
                 //     if (gap_cnt == 25'd0)
-                //         tx_state <= TX_RD_REQ;
+                //         tx_state <= TX_HDR;
                 //     else
                 //         gap_cnt <= gap_cnt - 25'd1;
                 // end

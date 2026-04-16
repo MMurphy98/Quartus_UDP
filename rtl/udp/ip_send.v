@@ -53,11 +53,13 @@ reg                start_en_d1      ;
 reg    [15:0]      tx_data_num      ;     //发送的有效数据字节个数
 reg    [15:0]      total_num        ;     //总字节数
 reg    [15:0]      udp_num          ;     //UDP字节数
+reg    [15:0]      tx_word_num      ;     //待发送的32-bit字数量
 reg                skip_en          ;     //控制状态跳转使能信号
 reg    [4:0]       cnt              ;
 reg    [31:0]      check_buffer     ;     //首部校验和
 reg    [2:0]       tx_bit_sel       ;
 reg    [15:0]      data_cnt         ;     //发送数据个数计数器
+reg    [15:0]      req_word_cnt     ;     //已经向上游请求过的32-bit字数量
 reg                tx_done_t        ;
 reg    [4:0]       real_add_cnt     ;     //以太网数据实际多发的字节数
                                     
@@ -90,6 +92,7 @@ always @(posedge clk or negedge rst_n) begin
         tx_data_num <= 16'd0;
         total_num <= 16'd0;
         udp_num <= 16'd0;
+        tx_word_num <= 16'd0;
     end
     else begin
         if(pos_start_en && cur_state==st_idle) begin
@@ -99,6 +102,7 @@ always @(posedge clk or negedge rst_n) begin
             total_num <= tx_byte_num + 16'd28;  
             //UDP长度：有效数据+UDP首部长度            
             udp_num <= tx_byte_num + 16'd8;               
+            tx_word_num <= (tx_byte_num + 16'd3) >> 2;
         end    
     end
 end                  
@@ -173,6 +177,7 @@ always @(posedge clk or negedge rst_n) begin
         tx_req <= 1'b0;
         tx_done_t <= 1'b0; 
         data_cnt <= 16'd0;
+        req_word_cnt <= 16'd0;
         real_add_cnt <= 5'd0;
         //初始化数组    
         //前导码 7个8'h55 + 1个8'hd5
@@ -309,7 +314,10 @@ always @(posedge clk or negedge rst_n) begin
                     if(cnt == 5'd6) begin
                         skip_en <= 1'b1;
                         //提前读请求数据，等待数据有效时发送
-                        tx_req <= 1'b1;                     
+                        if(tx_word_num != 16'd0) begin
+                            tx_req <= 1'b1;
+                            req_word_cnt <= 16'd1;
+                        end
                     end    
                 end                                        
                 else if(tx_bit_sel == 3'd7) begin
@@ -351,14 +359,17 @@ always @(posedge clk or negedge rst_n) begin
                     eth_tx_data <= tx_data[15:12];   
                 else if(tx_bit_sel == 3'd6) begin
                     eth_tx_data <= tx_data[3:0];
-                    // 仅在本包尚未到最后一字时请求下一字，避免多读一字（读到下一包 pkt_idx）
-                    if(data_cnt != tx_data_num - 16'd1 && data_cnt < tx_data_num - 16'd4)
+                    // 按32-bit字精确请求下一字，避免基于字节计数时在包边界过读。
+                    if(req_word_cnt < tx_word_num)
                         tx_req <= 1'b1;
+                    if(req_word_cnt < tx_word_num)
+                        req_word_cnt <= req_word_cnt + 16'd1;
                 end                                        
                 else if(tx_bit_sel == 3'd7)
                     eth_tx_data <= tx_data[7:4];                                                                                                        
                 if(skip_en) begin
                     data_cnt <= 16'd0;
+                    req_word_cnt <= 16'd0;
                     real_add_cnt <= 5'd0;
                     tx_bit_sel <= 3'd0;
                 end                                                          

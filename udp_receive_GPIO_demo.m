@@ -4,7 +4,7 @@ local_ip = '192.168.1.102';
 local_port = 1234;
 target_ip = '192.168.1.123';
 target_port = 1234;
-num_int32 = 8E6;
+num_int32 = 1E6;
 
 data_receive = udp_receive(local_ip, local_port, target_ip, target_port, num_int32);
 %% 数据验证
