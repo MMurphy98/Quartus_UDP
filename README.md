@@ -82,6 +82,15 @@ udp_test_assistant
 - 回读路径中单包按 RTL 协议解析（包含包序号和数据区）
 - 脚本内置 flag 与端序兼容检查（含反序 flag 诊断）
 
+## 当前联调状态
+
+- 当前板上 bitstream 的 MATLAB 回读基线应采用 `raw(2:129)` 解析。
+- 固定值 GPIO 回测已验证当前基线可工作。
+- 递增值 GPIO 回测表明：从第 128 个点开始出现跨包整体偏移，问题已收敛到 Verilog 读回链路，而非 GPIO 数据生成本身。
+- 当前重点排查对象为 `rtl/sdram_udp_bridge.v` 中按包读回的时序补偿逻辑。
+
+详细问题收束、实验结论与下一步预案见：`CURRENT_DEBUG_STATUS.md`
+
 ## 常见问题
 
 - 修改传输长度后，建议先 `quit` 再重启脚本，避免 `persistent` 状态干扰。
