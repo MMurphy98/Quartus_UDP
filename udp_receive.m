@@ -99,7 +99,7 @@ function recv_data_compare = udp_receive(local_ip, local_port, target_ip, target
                                         seq = double(typecast(recv_bytes_vec(4:-1:1), 'uint32'));
                                         if seq >= 1 && seq <= expected_packets
                                             recv_raw_bytes{seq} = recv_bytes_vec(1:PKT_BYTES);
-                                            recv_packets{seq} = raw(2:129);  % 只存 128 字数据，丢弃 raw(1)、raw(130)（首尾两字 pkt_idx）
+                                            recv_packets{seq} = raw(3:130);  % 丢弃前两个 pkt_idx，只保留 128 字数据
                                         end
                                         packets_received = packets_received + 1;
                                     end

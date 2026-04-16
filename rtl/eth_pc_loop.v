@@ -58,7 +58,8 @@ module eth_pc_loop(
     wire rec_pkt_done, rec_en;
     wire [31:0] rec_data;
     wire [15:0] rec_byte_num;
-    wire udp_read_cmd;
+    wire udp_read_cmd_in;
+    wire udp_read_cmd_issue;
     wire gpio_gen_en;
     wire tx_done, tx_req;
     wire tx_start_en;
@@ -80,6 +81,8 @@ module eth_pc_loop(
     wire rst_n = SW[0];
     wire rst_n_pll = SW[1];
     wire pkt_counter_rst_n;
+    reg udp_read_pending;
+    reg [7:0] gpio_word_pos;
 
     assign gpio_gen_en = 1'b1;
     assign pkt_counter_rst_n = sys_rst_n;
@@ -132,14 +135,35 @@ module eth_pc_loop(
         .rec_byte_num (gpio_rec_byte_num)
     );
 
-    // Keep UDP READ command support, but switch SDRAM write payload source to internal GPIO stream.
-    assign udp_read_cmd = udp_rec_en && udp_rec_pkt_done &&
-                          (udp_rec_byte_num == 16'd4) && (udp_rec_data == 32'h52454144);
+    // Keep UDP READ command support, but avoid injecting READ in the middle of a GPIO 128-word packet.
+    // A mid-packet injection corrupts one SDRAM packet and manifests as deterministic boundary errors.
+    assign udp_read_cmd_in = udp_rec_en && udp_rec_pkt_done &&
+                             (udp_rec_byte_num == 16'd4) && (udp_rec_data == 32'h52454144);
+    assign udp_read_cmd_issue = udp_read_pending && (gpio_word_pos == 8'd0) && !gpio_rec_en;
 
-    assign rec_en       = udp_read_cmd ? udp_rec_en       : gpio_rec_en;
-    assign rec_data     = udp_read_cmd ? udp_rec_data     : gpio_rec_data;
-    assign rec_pkt_done = udp_read_cmd ? udp_rec_pkt_done : gpio_rec_pkt_done;
-    assign rec_byte_num = udp_read_cmd ? udp_rec_byte_num : gpio_rec_byte_num;
+    always @(posedge ENET0_RX_CLK or negedge sys_rst_n) begin
+        if (!sys_rst_n) begin
+            udp_read_pending <= 1'b0;
+            gpio_word_pos    <= 8'd0;
+        end else begin
+            if (udp_read_cmd_in)
+                udp_read_pending <= 1'b1;
+            else if (udp_read_cmd_issue)
+                udp_read_pending <= 1'b0;
+
+            if (gpio_rec_en) begin
+                if (gpio_rec_pkt_done)
+                    gpio_word_pos <= 8'd0;
+                else
+                    gpio_word_pos <= gpio_word_pos + 1'b1;
+            end
+        end
+    end
+
+    assign rec_en       = udp_read_cmd_issue ? 1'b1          : gpio_rec_en;
+    assign rec_data     = udp_read_cmd_issue ? 32'h52454144  : gpio_rec_data;
+    assign rec_pkt_done = udp_read_cmd_issue ? 1'b1          : gpio_rec_pkt_done;
+    assign rec_byte_num = udp_read_cmd_issue ? 16'd4         : gpio_rec_byte_num;
 
     sdram_udp_bridge #(
         .ADDR_MIN     (ADDR_MIN),

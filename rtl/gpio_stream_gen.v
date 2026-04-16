@@ -98,7 +98,9 @@ module gpio_stream_gen #(
                     valid_phase <= 2'd0;
 
                     // First valid cycle: output upper 12 bits of current sample.
-                    gpio_data12 <= sample_word_counter[23:12];
+                    // gpio_data12 <= sample_word_counter[23:12];
+                    gpio_data12 <= 12'hFFF;
+
                 end else begin
                     period_cnt <= period_cnt + 1'b1;
                 end
@@ -108,7 +110,8 @@ module gpio_stream_gen #(
                     valid_phase <= 2'd1;
 
                     // Second valid cycle: output lower 12 bits of current sample.
-                    gpio_data12 <= sample_word_counter[11:0];
+                    // gpio_data12 <= sample_word_counter[11:0];
+                    gpio_data12 <= 12'h000;
                 end else begin
                     gpio_valid  <= 1'b0;
                     valid_phase <= 2'd0;
