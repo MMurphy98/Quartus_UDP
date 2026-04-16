@@ -11,7 +11,9 @@
 module gpio_stream_gen #(
     parameter VALID_PERIOD_CYCLES = 5'd5,  // Start one valid burst every N cycles
     parameter PAD_MODE            = 2'd0,  // 0: zero-pad, 1: one-pad, 2: sign-extend from bit23
-    parameter TOTAL_PKTS          = 32'd78125
+    parameter TOTAL_PKTS          = 32'd78125,
+    parameter DATA_MODE           = 2'd0,  // 0: internal increment, 1: constant word
+    parameter [23:0] CONST_WORD   = 24'hFFF000
 )(
     input             clk,
     input             rst_n,
@@ -47,6 +49,7 @@ module gpio_stream_gen #(
     wire [31:0] sample_32b = (PAD_MODE == 2'd1) ? sample_32b_one :
                              (PAD_MODE == 2'd2) ? sample_32b_sign :
                                                   sample_32b_zero;
+    wire [23:0] selected_word = (DATA_MODE == 2'd1) ? CONST_WORD : sample_word_counter;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -98,8 +101,7 @@ module gpio_stream_gen #(
                     valid_phase <= 2'd0;
 
                     // First valid cycle: output upper 12 bits of current sample.
-                    // gpio_data12 <= sample_word_counter[23:12];
-                    gpio_data12 <= 12'hFFF;
+                    gpio_data12 <= selected_word[23:12];
 
                 end else begin
                     period_cnt <= period_cnt + 1'b1;
@@ -110,8 +112,7 @@ module gpio_stream_gen #(
                     valid_phase <= 2'd1;
 
                     // Second valid cycle: output lower 12 bits of current sample.
-                    // gpio_data12 <= sample_word_counter[11:0];
-                    gpio_data12 <= 12'h000;
+                    gpio_data12 <= selected_word[11:0];
                 end else begin
                     gpio_valid  <= 1'b0;
                     valid_phase <= 2'd0;
